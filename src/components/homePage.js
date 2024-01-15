@@ -16,7 +16,6 @@ import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 
-
 const HomePage = () => {
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
@@ -28,11 +27,16 @@ const HomePage = () => {
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [selectedMembers, setSelectedMembers] = useState([]);
+  const [selectedMessage, setSelectedMessage] = useState(null);
+  // Thêm state để theo dõi vị trí chuột khi click phải
+  const [contextMenuPosition, setContextMenuPosition] = useState({ top: -100, left: -100 });
+
 
   const navigate = useNavigate();
 
   // const [messageType, setMessageType] = useState('')
 
+  //socket
   useEffect(() => {
     if (user) {
       const socket = io.connect('http://127.0.0.1:4000', {
@@ -179,9 +183,14 @@ const HomePage = () => {
     fetchMessages();
   }, [selectedConversation]);
 
-
   // Ref để truy cập input file
   const fileInputRef = React.createRef();
+
+  const isLink = (message) => {
+    // Bạn có thể sử dụng một biểu thức chính quy đơn giản để kiểm tra đường link
+    const linkRegex = /^(ftp|http|https):\/\/[^ "]+$/;
+    return linkRegex.test(message);
+  };
 
   const handleSendMessage = async () => {
     // Gọi API để gửi tin nhắn mới
@@ -197,24 +206,23 @@ const HomePage = () => {
         if (fileInputRef.current && fileInputRef.current.files.length > 0) {
           formData.append('MessageType', 'sendFile');
           formData.append('Message', fileInputRef.current.files[0]); // Thêm file vào formData
-        } else {
+        } else if (isLink(newMessage)) {
+          formData.append('MessageType', 'link');
+        }
+        else {
           formData.append('MessageType', 'text');
         }
+        console.log(isLink(newMessage));
         // Lấy thông tin người dùng từ local storage
         const parsedUser = JSON.parse(storedUser);
         formData.append('SenderID', parsedUser._id); // Sử dụng _id của user đã đăng nhập
         formData.append('ConversationID', selectedConversation.conversationId);
         formData.append('Message', newMessage);
-        await axios.post('http://localhost:9000/api/message/SendMessage', formData, {
+        const response = await axios.post('http://localhost:9000/api/message/SendMessage', formData, {
           headers: {
             'Content-Type': 'multipart/form-data',
           },
         });
-        // const response = await axios.post('http://localhost:9000/api/message/SendMessage', formData, {
-        //   headers: {
-        //     'Content-Type': 'multipart/form-data',
-        //   },
-        // });
         // setMessages([...messages, response.data.data]);
         setNewMessage('');
       } catch (error) {
@@ -268,6 +276,7 @@ const HomePage = () => {
       formData1.append('senderId', user._id);
       formData1.append('conversationId', newConversationId);
       const response1 = await axios.post('http://localhost:9000/api/conversations/GetConversation', formData1);
+      console.log(response1.data.data);
       setSelectedConversation(response1.data.data.conversation_info);
       // Bước 3: Fetch tin nhắn cho cuộc trò chuyện mới
       fetchMessages();
@@ -324,9 +333,6 @@ const HomePage = () => {
     console.log(selectedMembers)
   };
 
-
-
-
   // Hàm tạo nhóm mới
   const handleCreateGroup = async () => {
     try {
@@ -370,6 +376,156 @@ const HomePage = () => {
       console.error('Lỗi khi tạo nhóm:', error);
     }
   };
+
+  const hasInfoLink = (message) => {
+    if (message.infoLink && message.infoLink.title !== null) {
+      return true
+    } else return false
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault(); // Ngăn chặn việc xuống dòng khi nhấn Enter
+      handleSendMessage();
+    }
+  };
+
+  // Hàm xóa tin nhắn
+  const handleDeleteMessage = async (ConversationID, MessageID) => {
+    try {
+      const formData = new FormData();
+      formData.append('MessageID', MessageID);
+      formData.append('ConversationID', ConversationID);
+
+      // Gọi API để xóa tin nhắn
+      await axios.post('http://localhost:9000/api/message/DeleteMessage', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      // Cập nhật danh sách tin nhắn sau khi xóa
+      const updatedMessages = messages.filter((message) => message.messageID !== MessageID);
+      setMessages(updatedMessages);
+    } catch (error) {
+      console.error('Lỗi khi xóa tin nhắn:', error);
+    }
+  };
+
+  // Hàm xử lý sự kiện chuột phải và hiển thị menu context
+  const handleContextMenu = (e, message) => {
+    e.preventDefault();
+    setContextMenuPosition({ top: e.clientY, left: e.clientX });
+    setSelectedMessage(message);
+  };
+
+  const handleDeleteSelectedMessage = () => {
+    if (selectedMessage) {
+      // Gọi hàm xóa tin nhắn ở đây
+      console.log(selectedMessage)
+      handleDeleteMessage(selectedMessage.conversationID, selectedMessage.messageID);
+      // Đặt lại tin nhắn được chọn sau khi xóa
+      setSelectedMessage(null);
+    }
+  };
+
+  // HTML và CSS cho menu context
+
+  const contextMenu = (
+    <div
+      id="context-menu"
+      style={{
+        position: 'fixed',
+        top: contextMenuPosition.top,
+        left: contextMenuPosition.left,
+        display: selectedMessage ? 'block' : 'none',
+        background: '#fff',
+        border: '1px solid #ccc',
+        borderRadius: '5px',
+        zIndex: 1000,
+      }}
+    >
+      <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+        <li style={{ padding: '10px', cursor: 'pointer' }} onClick={handleDeleteSelectedMessage}>Xóa tin nhắn</li>
+      </ul>
+    </div>
+  );
+
+  const handleDeleteConversation = async (conversationId) => {
+    try {
+      const formData = new FormData();
+      formData.append('conversationId', conversationId);
+      console.log(formData.get('conversationId'));
+      // Gọi API để xóa tin nhắn
+      await axios.post('http://localhost:9000/api/conversations/RemoveConversation', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      // Cập nhật danh sách cuộc trò chuyện
+      const updateConversation = conversations.filter((conv) => conv.conversationId !== conversationId);
+      setConversations(updateConversation);
+    } catch (error) {
+      console.error('Lỗi khi xóa tin nhắn:', error);
+    }
+  };
+
+  // Hàm xử lý sự kiện chuột phải và hiển thị menu context
+  const handleContextMenuConversation = (e, conversation) => {
+    e.preventDefault();
+    setContextMenuPosition({ top: e.clientY, left: e.clientX });
+    setSelectedConversation(conversation);
+  };
+
+  const handleDeleteSelectedConversation = () => {
+    if (selectedConversation) {
+      handleDeleteConversation(selectedConversation.conversationId);
+      // Đặt lại tin nhắn được chọn sau khi xóa
+      setSelectedConversation(null);
+    }
+  };
+
+  const handlePersonalConversation = async (otherUserId) => {
+    try {
+      // Navigate to the other user's personal page
+      navigate(`/otherPersonal/${otherUserId}`);
+    } catch (error) {
+      console.error('Lỗi khi xóa tin nhắn:', error);
+    }
+  };
+
+  const handlePersonalSelectedConversation = () => {
+    if (selectedConversation) {
+      const otherUserId = selectedConversation.listMember.find(member => member._id !== user._id)._id;
+      handlePersonalConversation(otherUserId);
+      setSelectedConversation(null);
+    }
+  };
+
+  const contextMenuConversation = (
+    <div
+      id="context-menu"
+      style={{
+        position: 'fixed',
+        top: contextMenuPosition.top,
+        left: contextMenuPosition.left,
+        display: selectedConversation ? 'block' : 'none',
+        background: '#fff',
+        border: '1px solid #ccc',
+        borderRadius: '5px',
+        zIndex: 1000,
+      }}
+    >
+      <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+        <li style={{ padding: '10px', cursor: 'pointer' }} onClick={handleDeleteSelectedConversation}>Xóa cuộc trò chuyện</li>
+        <li style={{ padding: '10px', cursor: 'pointer' }} onClick={handlePersonalSelectedConversation}>Trang cá nhân</li>
+      </ul>
+    </div>
+  );
+
+
+
 
   return (
     <div>
@@ -499,9 +655,9 @@ const HomePage = () => {
         <MDBRow>
           <MDBCol md="6" lg="5" xl="4" className="mb-4 mb-md-0">
             <h5 className="font-weight-bold mb-3 text-center text-black" style={{ fontSize: '25px' }}>Danh sách cuộc trò chuyện</h5>
-            <MDBCard className="mask-custom" style={{ overflowY: 'scroll', display: 'flex', flexDirection: 'column-reverse' }}>
+            <MDBCard className="mask-custom" style={{ maxHeight: "700px", overflowY: 'scroll', display: 'flex' }}>
               <MDBCardBody>
-                <MDBTypography listUnStyled className="mb-0">
+                <MDBTypography listUnStyled className="mb-0" >
                   {conversations.map((conversation) => (
                     <li
                       key={conversation.conversationId}
@@ -509,13 +665,15 @@ const HomePage = () => {
                         }`}
                       style={{ backgroundColor: '#eee', cursor: 'pointer' }}
                       onClick={() => setSelectedConversation(conversation)}
+                      onContextMenu={(e) => handleContextMenuConversation(e, conversation)}
                     >
                       <div className="d-flex flex-row">
                         <img
                           src={conversation.linkAvatar}
                           alt="avatar"
                           className="rounded-circle d-flex align-self-center me-3 shadow-1-strong"
-                          width="60"
+                          width="80"
+                          height='90px'
                         />
                         <div className="pt-1" style={{ fontSize: '20px' }}>
                           <p className="fw-bold mb-0">{conversation.conversationName}</p>
@@ -532,7 +690,7 @@ const HomePage = () => {
           <MDBCol md="6" lg="7" xl="8">
             {selectedConversation && (
               <div>
-                <div style={{ maxHeight: '600px', overflowY: 'scroll', display: 'flex', flexDirection: 'column-reverse' }}>
+                <div style={{ maxHeight: '600px', overflowY: 'scroll', display: 'flex', flexDirection: 'column-reverse', position: "relative" }}>
                   <MDBTypography listUnStyled>
                     {messages.slice(-10).map((message) => {
                       // Kiểm tra xem user đã đăng nhập chưa
@@ -544,112 +702,163 @@ const HomePage = () => {
                         isCurrentUser = true
                       } else isCurrentUser = message.senderID === parsedUser._id
                       const sender = selectedConversation.listMember.find((member) => member._id === message.senderID);
-
+                      // Kiểm tra có InfoLink trong tin nhắn không
+                      const hasLinkInfo = hasInfoLink(message);
                       return (
-                        <li key={message.messageID} className={`d-flex justify-content-${isCurrentUser ? 'end' : 'start'} mb-4`}>
-                          {isCurrentUser ? (
-                            <>
-                              <MDBCard style={{ minWidth: 'fit-content', marginLeft: 'auto', marginRight: '20px' }}>
-                                <MDBCardHeader className="d-flex justify-content-between p-2">
-                                  <p className="fw-bold mb-0">{sender?.userName}</p>
-                                  <p className="text-muted small mb-0">
-                                    <MDBIcon far icon="clock" /> {message.createAt}
-                                  </p>
-                                </MDBCardHeader>
-                                <MDBCardBody>
-                                  <p className="mb-0" style={{ fontSize: '20px' }}>{message.message}</p>
-                                  {/* Display files if available */}
-                                  {message.listFile.map((file, index) => (
-                                    // Check if the file is an image
-                                    /\.(jpg|jpeg|png|gif)$/i.test(file.originalname) ? (
-                                      <img
-                                        key={index}
-                                        src={`http://localhost:9000/api/file/DownLoadFile/${file.originalname}`}
-                                        alt={file.originalname}
-                                        style={{ maxWidth: '100%', maxHeight: '200px' }}
-                                      />
-                                    ) : (
-                                      // Display link for non-image files
-                                      <div key={index}>
-                                        <a href={`http://localhost:9000/api/file/DownLoadFile/${file.originalname}`} target="_blank" rel="noopener noreferrer">
-                                          {file.originalname}
-                                        </a>
-                                      </div>
-                                    )
-                                  ))}
-                                </MDBCardBody>
-                              </MDBCard>
-                              {sender?.avatarUser && (
-                                <img
-                                  src={sender.avatarUser}
-                                  alt={sender.userName}
-                                  className="avatar-image me-3"
-                                  style={{ width: '40px', height: '40px', borderRadius: '50%' }}
-                                />
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              {/* Display Avatar */}
-                              {sender?.avatarUser && (
-                                <img
-                                  src={sender.avatarUser}
-                                  alt={sender.userName}
-                                  className="avatar-image me-3"
-                                  style={{ width: '40px', height: '40px', borderRadius: '50%' }}
-                                />
-                              )}
+                        <React.Fragment key={message.messageID}>
+                          <li className={`d-flex justify-content-${isCurrentUser ? 'end' : 'start'} mb-4`} >
+                            {isCurrentUser ? (
+                              <>
+                                <MDBCard style={{ minWidth: 'fit-content', marginLeft: 'auto', marginRight: '20px' }} onContextMenu={(e) => handleContextMenu(e, message)}>
+                                  <MDBCardHeader className="d-flex justify-content-between p-2">
+                                    <p className="fw-bold mb-0">{sender?.userName}</p>
+                                    <p className="text-muted small mb-0">
+                                      <MDBIcon far icon="clock" /> {message.createAt}
+                                    </p>
+                                  </MDBCardHeader>
+                                  <MDBCardBody>
+                                    <p className="mb-0" style={{ fontSize: '20px' }}>{message.message}</p>
+                                    {/* Display files if available */}
+                                    {message.listFile.map((file, index) => (
+                                      // Check if the file is an image
+                                      /\.(jpg|jpeg|png|gif)$/i.test(file.originalname) ? (
+                                        <img
+                                          key={index}
+                                          src={`http://localhost:9000/api/file/DownLoadFile/${file.originalname}`}
+                                          alt={file.originalname}
+                                          style={{ maxWidth: '100%', maxHeight: '200px' }}
+                                        />
+                                      ) : (
+                                        // Display link for non-image files
+                                        <div key={index}>
+                                          <a href={`http://localhost:9000/api/file/DownLoadFile/${file.originalname}`} target="_blank" rel="noopener noreferrer">
+                                            {file.originalname}
+                                          </a>
+                                        </div>
+                                      )
+                                    ))}
+                                  </MDBCardBody>
+                                </MDBCard>
+                                {sender?.avatarUser && (
+                                  <img
+                                    src={sender.avatarUser}
+                                    alt={sender.userName}
+                                    className="avatar-image me-3"
+                                    style={{ width: '40px', height: '40px', borderRadius: '50%' }}
+                                  />
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                {/* Display Avatar */}
+                                {sender?.avatarUser && (
+                                  <img
+                                    src={sender.avatarUser}
+                                    alt={sender.userName}
+                                    className="avatar-image me-3"
+                                    style={{ width: '40px', height: '40px', borderRadius: '50%' }}
+                                  />
+                                )}
+                                <MDBCard style={{ minWidth: 'fit-content' }}>
+                                  <MDBCardHeader className="d-flex justify-content-between p-2">
+                                    <p className="fw-bold mb-0">{sender?.userName}</p>
+                                    <p className="text-muted small mb-0">
+                                      <MDBIcon far icon="clock" /> {message.createAt}
+                                    </p>
+                                  </MDBCardHeader>
+                                  <MDBCardBody>
+                                    <p className="mb-0" style={{ fontSize: '20px' }}>{message.message}</p>
+                                    {/* Display files if available */}
+                                    {message.listFile.map((file, index) => (
+                                      // Check if the file is an image
+                                      /\.(jpg|jpeg|png|gif)$/i.test(file.originalname) ? (
+                                        <img
+                                          key={index}
+                                          src={`http://localhost:9000/api/file/DownLoadFile/${file.originalname}`}
+                                          alt={file.originalname}
+                                          style={{ maxWidth: '100%', maxHeight: '200px' }}
+                                        />
+                                      ) : (
+                                        // Display link for non-image files
+                                        <div key={index}>
+                                          <a href={`http://localhost:9000/api/file/DownLoadFile/${file.originalname}`} target="_blank" rel="noopener noreferrer">
+                                            {file.originalname}
+                                          </a>
+                                        </div>
+                                      )
+                                    ))}
+                                  </MDBCardBody>
+                                </MDBCard>
+                              </>
+                            )}
+                          </li>
+                          {hasLinkInfo && (
+                            <li className={`d-flex justify-content-${isCurrentUser ? 'end' : 'start'} mb-4`}>
                               <MDBCard style={{ minWidth: 'fit-content' }}>
                                 <MDBCardHeader className="d-flex justify-content-between p-2">
-                                  <p className="fw-bold mb-0">{sender?.userName}</p>
+                                  <p className="fw-bold mb-0">InfoLink</p>
                                   <p className="text-muted small mb-0">
                                     <MDBIcon far icon="clock" /> {message.createAt}
                                   </p>
                                 </MDBCardHeader>
                                 <MDBCardBody>
-                                  <p className="mb-0" style={{ fontSize: '20px' }}>{message.message}</p>
-                                  {/* Display files if available */}
-                                  {message.listFile.map((file, index) => (
-                                    // Check if the file is an image
-                                    /\.(jpg|jpeg|png|gif)$/i.test(file.originalname) ? (
-                                      <img
-                                        key={index}
-                                        src={`http://localhost:9000/api/file/DownLoadFile/${file.originalname}`}
-                                        alt={file.originalname}
-                                        style={{ maxWidth: '100%', maxHeight: '200px' }}
-                                      />
-                                    ) : (
-                                      // Display link for non-image files
-                                      <div key={index}>
-                                        <a href={`http://localhost:9000/api/file/DownLoadFile/${file.originalname}`} target="_blank" rel="noopener noreferrer">
-                                          {file.originalname}
-                                        </a>
-                                      </div>
-                                    )
-                                  ))}
+                                  {/* Hiển thị thông tin từ InfoLink */}
+                                  <p className="mb-0" style={{ fontSize: '20px' }}>
+                                    {/* Hiển thị các thông tin từ InfoLink, ví dụ: */}
+                                    Title: {message.infoLink.title}
+                                    <br />
+                                    Description: {message.infoLink.description}
+                                    <br />
+                                    {/* Hiển thị URL có thể nhấp vào */}
+                                    URL: <a href={message.infoLink.linkHome} target="_blank" rel="noopener noreferrer">{message.infoLink.linkHome}</a>
+                                    <br />
+                                    <img src={message.infoLink.image} alt="" style={{ maxWidth: '100%', maxHeight: '200px' }} />
+                                  </p>
                                 </MDBCardBody>
                               </MDBCard>
-                            </>
+                            </li>
                           )}
-                        </li>
+                        </React.Fragment>
                       );
                     })}
                   </MDBTypography>
-                </div>
-                <div className="bg-white mb-3">
-                  <MDBTextArea
-                    rows={1}
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    spellCheck={false}
-                  />
+
+                  {/* Context Menu */}
+                  {selectedMessage && (
+                    <div id="context-menu" style={{ position: 'absolute', display: 'none' }}>
+                      <ul>
+                        <li onClick={handleDeleteSelectedMessage}>Xóa tin nhắn</li>
+                        {/* <li onClick={handleEditSelectedMessage}>Sửa tin nhắn</li> */}
+                      </ul>
+                    </div>
+                  )}
+
+                  {selectedConversation && (
+                    <div id="context-menu" style={{ position: 'absolute', display: 'none' }}>
+                      <ul>
+                        <li onClick={handleDeleteSelectedConversation}>Xóa cuộc trò chuyện</li>
+                        <li onClick={handlePersonalSelectedConversation}>Trang cá nhân</li>
+                      </ul>
+                    </div>
+                  )}
+                </div >
+                <div className="message-input-container" style={{ position: "absolute", bottom: 0, width: " 65%", marginBottom: "20px" }}>
+                  <div className="bg-white mb-3">
+                    <MDBTextArea
+                      rows={1}
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      onKeyDown={handleKeyPress}
+                    />
+                  </div>
+
+                  {/* Input để chọn file */}
+                  <input type="file" ref={fileInputRef} />
+                  <MDBBtn color="info" rounded className="float-end" style={{ fontSize: '18px' }} onClick={handleSendMessage}>
+                    Send
+                  </MDBBtn>
                 </div>
 
-                {/* Input để chọn file */}
-                <input type="file" ref={fileInputRef} />
-                <MDBBtn color="info" rounded className="float-end" style={{ fontSize: '18px' }} onClick={handleSendMessage}>
-                  Send
-                </MDBBtn>
               </div>
 
             )}
@@ -657,7 +866,11 @@ const HomePage = () => {
 
         </MDBRow>
       </MDBContainer>
+      {/* Context Menu */}
+      {contextMenu}
+      {contextMenuConversation}
     </div>
+
 
   );
 };
