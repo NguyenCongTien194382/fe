@@ -1,0 +1,12 @@
+senderID
+messageID
+createAt
+listFile:originalname
+message
+
+
+
+conversationId
+linkAvatar
+conversationName
+message
